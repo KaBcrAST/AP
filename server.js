@@ -41,10 +41,13 @@ app.use(
   })
 );
 
-// Routes
+
+
 app.get("/login", (req, res) => {
-  res.send('<a href="/auth/openid">Login with Azure AD</a>');
-});
+    console.log("Login route accessed");
+    res.send('<a href="/auth/openid">Login with Azure AD</a>');
+  });
+  
 
 // Route pour démarrer l'authentification avec Azure AD
 app.get(
@@ -73,8 +76,8 @@ app.get("/profile", (req, res) => {
   res.json(req.user); // Afficher les informations du profil utilisateur
 });
 
-// Déterminer le port à utiliser, en fonction de la variable d'environnement définie par Azure ou utiliser le port 3001 pour local
-const port = process.env.PORT || 3001; // Azure définit automatiquement la variable PORT
+// Déterminer le port à utiliser, en fonction de la variable d'environnement définie par Azure
+const port = process.env.PORT || 3000; // Azure définit automatiquement la variable PORT
 app.listen(port, () => {
-  console.log(`Server started on http://localhost:${port}`);
+  console.log(`Server started on port ${port}`);
 });
