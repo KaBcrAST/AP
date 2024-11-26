@@ -102,13 +102,15 @@ app.get(
   }
 );
 
-// Route pour afficher le profil de l'utilisateur
 app.get("/profile", (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.redirect("/login");
-  }
-  res.json(req.user); // Afficher les informations du profil utilisateur
-});
+    if (!req.isAuthenticated()) {
+      console.log("Utilisateur non authentifié, redirection vers /login");
+      return res.redirect("/login");
+    }
+    console.log("Utilisateur authentifié, affichage du profil");
+    res.json(req.user); // Afficher les informations de l'utilisateur
+  });
+  
 
 // Démarrer le serveur
 const port = process.env.PORT || 3000;
