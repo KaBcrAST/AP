@@ -10,16 +10,12 @@ dotenv.config();
 
 // Middleware pour gérer les sessions (doit être avant passport.initialize et passport.session)
 app.use(
-    session({
-      secret: process.env.SESSION_SECRET || "default-session-secret",
-      resave: false,
-      saveUninitialized: true,
-      cookie: {
-        secure: process.env.NODE_ENV === 'production', // Utiliser des cookies sécurisés en production (HTTPS)
-      }
-    })
-  );
-  
+  session({
+    secret: process.env.SESSION_SECRET || "default-session-secret", // Clé secrète pour sécuriser la session
+    resave: false, // Ne pas sauvegarder la session si elle n'a pas été modifiée
+    saveUninitialized: true, // Sauvegarder la session même si elle n'a pas été initialisée
+  })
+);
 
 // Initialiser Passport
 app.use(passport.initialize());
