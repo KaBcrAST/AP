@@ -5,40 +5,38 @@ const { OIDCStrategy } = require("passport-azure-ad");
 const dotenv = require("dotenv");
 const cors = require("cors");
 
-// Charger les variables d'environnement depuis le fichier .env
 dotenv.config();
-
 const app = express();
 
-// Configuration CORS
+// Configuration CORS pour autoriser le frontend
 const allowedOrigins = [
-  "https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net", // Origine de votre app React déployée
+  "http://localhost:3000",  // Frontend local (ajustez en production)
+  "https://gentle-wave-023be5a03.5.azurestaticapps.net",  // URL de votre app déployée sur Azure
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
       if (!origin || allowedOrigins.includes(origin)) {
-        // Autoriser si l'origine est dans la liste ou absente (Postman, scripts)
         callback(null, true);
       } else {
         callback(new Error("CORS non autorisé pour cette origine."));
       }
     },
-    credentials: true, // Nécessaire pour permettre l'envoi des cookies/sessions
+    credentials: true,
   })
 );
 
-// Middleware pour les sessions
+// Middleware pour gérer les sessions
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "default-session-secret",
+    secret: process.env.SESSION_SECRET || "default-secret",
     resave: true,
     saveUninitialized: true,
     cookie: {
-      secure: process.env.NODE_ENV === "production", // Cookies sécurisés uniquement en production (HTTPS)
+      secure: process.env.NODE_ENV === "production",
       httpOnly: true,
-      sameSite: "None", // Important pour les cookies cross-origin
+      sameSite: "None",
     },
   })
 );
@@ -47,60 +45,50 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Configurer Passport pour utiliser Azure AD OIDC
+// Configurer l'authentification Azure AD
 passport.use(
   new OIDCStrategy(
     {
-      identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/.well-known/openid-configuration`, // URL de l'OpenID Configuration pour votre tenant
-      clientID: process.env.CLIENT_ID, // Votre Client ID
-      clientSecret: process.env.CLIENT_SECRET, // Votre Client Secret
+      identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/.well-known/openid-configuration`,
+      clientID: process.env.CLIENT_ID,
+      clientSecret: process.env.CLIENT_SECRET,
       responseType: "code",
       responseMode: "query",
-      redirectUrl: process.env.REDIRECT_URI, // URL de redirection après l'authentification (doit être l'URL de votre app sur Azure)
-      allowHttpForRedirectUrl: true, // Important pour les tests en local (utilisation d'http au lieu de https)
+      redirectUrl: process.env.REDIRECT_URI,  // Doit pointer vers votre endpoint de callback
+      allowHttpForRedirectUrl: true, // Seulement en local pour HTTP
       passReqToCallback: false,
-      scope: ["profile", "email"], // Scopes nécessaires pour obtenir les informations du profil utilisateur
+      scope: ["profile", "email"],
     },
     (iss, sub, profile, accessToken, refreshToken, done) => {
-      return done(null, profile); // Stoker le profil de l'utilisateur dans la session
+      return done(null, profile); // Stocker l'utilisateur dans la session
     }
   )
 );
 
-// Routes
+// Routes pour la gestion de l'authentification
 app.get("/login", (req, res) => {
   res.send('<a href="/auth/openid">Login with Azure AD</a>');
 });
 
-// Route pour démarrer l'authentification avec Azure AD
 app.get(
   "/auth/openid",
   passport.authenticate("azuread-openidconnect", {
     failureRedirect: "/login",
   }),
   (req, res) => {
-    res.redirect("/profile"); // Une fois l'authentification réussie, rediriger vers le profil
+    res.json(req.user); // Renvoie directement l'utilisateur après une authentification réussie
   }
 );
 
-// Route de retour après l'authentification réussie
 app.get("/auth/openid/return", 
   passport.authenticate("azuread-openidconnect", { failureRedirect: "/login" }), 
   (req, res) => {
-    res.redirect("/profile"); // Rediriger vers le profil
+    res.json(req.user);  // Renvoie l'utilisateur au frontend
   }
 );
 
-// Route pour afficher le profil de l'utilisateur
-app.get("/profile", (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.redirect("/login");
-  }
-  res.json(req.user); // Afficher les informations du profil utilisateur
-});
-
-// Déterminer le port à utiliser, en fonction de la variable d'environnement définie par Azure ou utiliser le port 3001 pour local
-const port = process.env.PORT || 3001; // Azure définit automatiquement la variable PORT
+// Définir le port
+const port = process.env.PORT || 3001;
 app.listen(port, () => {
   console.log(`Server started on http://localhost:${port}`);
 });
