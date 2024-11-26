@@ -8,6 +8,23 @@ const app = express();
 // Charger les variables d'environnement depuis le fichier .env
 dotenv.config();
 
+// Middleware pour gérer les sessions (doit être avant passport.initialize et passport.session)
+app.use(
+    session({
+      secret: process.env.SESSION_SECRET || "default-session-secret",
+      resave: false,
+      saveUninitialized: true,
+      cookie: {
+        secure: process.env.NODE_ENV === 'production', // Utiliser des cookies sécurisés en production (HTTPS)
+      }
+    })
+  );
+  
+
+// Initialiser Passport
+app.use(passport.initialize());
+app.use(passport.session());
+
 // Configurer Passport pour utiliser Azure AD OIDC
 passport.use(
   new OIDCStrategy(
@@ -28,26 +45,11 @@ passport.use(
   )
 );
 
-// Initialiser Passport
-app.use(passport.initialize());
-app.use(passport.session());
-
-// Middleware pour les sessions
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "default-session-secret", // Utiliser une session sécurisée
-    resave: true,
-    saveUninitialized: true,
-  })
-);
-
-
-
+// Routes
 app.get("/login", (req, res) => {
-    console.log("Login route accessed");
-    res.send('<a href="/auth/openid">Login with Azure AD</a>');
-  });
-  
+  console.log("Login route accessed");
+  res.send('<a href="/auth/openid">Login with Azure AD</a>');
+});
 
 // Route pour démarrer l'authentification avec Azure AD
 app.get(
@@ -61,8 +63,9 @@ app.get(
 );
 
 // Route de retour après l'authentification réussie
-app.get("/auth/openid/return", 
-  passport.authenticate("azuread-openidconnect", { failureRedirect: "/login" }), 
+app.get(
+  "/auth/openid/return",
+  passport.authenticate("azuread-openidconnect", { failureRedirect: "/login" }),
   (req, res) => {
     res.redirect("/profile"); // Rediriger vers le profil
   }
