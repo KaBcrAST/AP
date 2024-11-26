@@ -39,6 +39,7 @@ app.use(
     cookie: {
       secure: process.env.NODE_ENV === "production", // Cookies sécurisés uniquement en production (HTTPS)
       httpOnly: true, // Les cookies ne sont pas accessibles via JavaScript côté client
+      sameSite: 'None', // Permet les cookies tiers, nécessaire pour les applications distribuées
     },
   })
 );
@@ -102,15 +103,16 @@ app.get(
   }
 );
 
+// Route pour afficher le profil de l'utilisateur
 app.get("/profile", (req, res) => {
-    if (!req.isAuthenticated()) {
-      console.log("Utilisateur non authentifié, redirection vers /login");
-      return res.redirect("/login");
-    }
-    console.log("Utilisateur authentifié, affichage du profil");
-    res.json(req.user); // Afficher les informations de l'utilisateur
-  });
-  
+  console.log("Vérification de l'authentification : ", req.isAuthenticated());
+  if (!req.isAuthenticated()) {
+    console.log("Utilisateur non authentifié, redirection vers /login");
+    return res.redirect("/login");
+  }
+  console.log("Utilisateur authentifié, affichage du profil");
+  res.json(req.user); // Afficher les informations de l'utilisateur
+});
 
 // Démarrer le serveur
 const port = process.env.PORT || 3000;
