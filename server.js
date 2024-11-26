@@ -3,17 +3,43 @@ const passport = require("passport");
 const session = require("express-session");
 const { OIDCStrategy } = require("passport-azure-ad");
 const dotenv = require("dotenv");
-const app = express();
+const cors = require("cors");
 
 // Charger les variables d'environnement depuis le fichier .env
 dotenv.config();
 
-// Middleware pour gérer les sessions (doit être avant passport.initialize et passport.session)
+const app = express();
+
+// Configuration CORS
+const allowedOrigins = [
+  "http://localhost:3000", // Origine pour le développement local
+  "https://gentle-wave-023be5a03.5.azurestaticapps.net", // Origine de votre app React déployée
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        // Autoriser si l'origine est dans la liste ou absente (Postman, scripts)
+        callback(null, true);
+      } else {
+        callback(new Error("CORS non autorisé pour cette origine."));
+      }
+    },
+    credentials: true, // Nécessaire pour permettre l'envoi des cookies/sessions
+  })
+);
+
+// Middleware pour gérer les sessions (doit être avant Passport)
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "default-session-secret", // Clé secrète pour sécuriser la session
     resave: false, // Ne pas sauvegarder la session si elle n'a pas été modifiée
     saveUninitialized: true, // Sauvegarder la session même si elle n'a pas été initialisée
+    cookie: {
+      secure: process.env.NODE_ENV === "production", // Cookies sécurisés uniquement en production (HTTPS)
+      httpOnly: true, // Les cookies ne sont pas accessibles via JavaScript côté client
+    },
   })
 );
 
@@ -36,10 +62,19 @@ passport.use(
       scope: ["profile", "email"], // Scopes nécessaires pour obtenir les informations du profil utilisateur
     },
     (iss, sub, profile, accessToken, refreshToken, done) => {
-      return done(null, profile); // Stoker le profil de l'utilisateur dans la session
+      return done(null, profile); // Stocker le profil de l'utilisateur dans la session
     }
   )
 );
+
+// Sérialisation et désérialisation de l'utilisateur pour Passport
+passport.serializeUser((user, done) => {
+  done(null, user);
+});
+
+passport.deserializeUser((user, done) => {
+  done(null, user);
+});
 
 // Routes
 app.get("/login", (req, res) => {
