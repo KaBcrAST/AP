@@ -51,15 +51,15 @@ app.use(passport.session());
 passport.use(
   new OIDCStrategy(
     {
-      identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/.well-known/openid-configuration`, // URL de l'OpenID Configuration pour votre tenant
-      clientID: process.env.CLIENT_ID, // Votre Client ID
-      clientSecret: process.env.CLIENT_SECRET, // Votre Client Secret
+      identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/.well-known/openid-configuration`,
+      clientID: process.env.CLIENT_ID,
+      clientSecret: process.env.CLIENT_SECRET,
       responseType: "code",
       responseMode: "query",
       redirectUrl: process.env.REDIRECT_URI, // URL de redirection après l'authentification
       allowHttpForRedirectUrl: true, // Important pour les tests en local (utilisation d'http au lieu de https)
       passReqToCallback: false,
-      scope: ["profile", "email"], // Scopes nécessaires pour obtenir les informations du profil utilisateur
+      scope: ["profile", "email"],
     },
     (iss, sub, profile, accessToken, refreshToken, done) => {
       return done(null, profile); // Stocker le profil de l'utilisateur dans la session
@@ -110,8 +110,8 @@ app.get("/profile", (req, res) => {
   res.json(req.user); // Afficher les informations du profil utilisateur
 });
 
-// Déterminer le port à utiliser, en fonction de la variable d'environnement définie par Azure
-const port = process.env.PORT || 3000; // Azure définit automatiquement la variable PORT
+// Démarrer le serveur
+const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Server started on port ${port}`);
 });
