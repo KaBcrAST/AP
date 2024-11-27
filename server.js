@@ -27,12 +27,12 @@ app.get("/auth/login", (req, res) => {
   res.redirect(authUrl);
 });
 
-// Endpoint pour gérer le callback après authentification
+// Endpoint pour gérer le callback après authentification avec PKCE
 app.get("/auth/callback", async (req, res) => {
-  const { code } = req.query;
+  const { code, code_verifier } = req.query;
 
-  if (!code) {
-    return res.status(400).send("Code d'autorisation manquant.");
+  if (!code || !code_verifier) {
+    return res.status(400).send("Code d'autorisation ou code_verifier manquant.");
   }
 
   try {
@@ -44,6 +44,7 @@ app.get("/auth/callback", async (req, res) => {
         grant_type: "authorization_code",
         code: code,
         redirect_uri: REDIRECT_URI,
+        code_verifier: code_verifier,  // Ajouter le code_verifier ici
       }),
       { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
