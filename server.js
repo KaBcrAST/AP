@@ -1,94 +1,83 @@
 const express = require("express");
-const passport = require("passport");
 const session = require("express-session");
+const passport = require("passport");
 const { OIDCStrategy } = require("passport-azure-ad");
 const dotenv = require("dotenv");
 const cors = require("cors");
 
+// Charger les variables d'environnement
 dotenv.config();
+
 const app = express();
+app.use(cors()); // Permettre les requêtes cross-origin entre le frontend et le backend
 
-// Configuration CORS pour autoriser le frontend
-const allowedOrigins = [
-  "http://localhost:3000",  // Frontend local (ajustez en production)
-  "https://gentle-wave-023be5a03.5.azurestaticapps.net",  // URL de votre app déployée sur Azure
-];
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("CORS non autorisé pour cette origine."));
-      }
-    },
-    credentials: true,
-  })
-);
-
-// Middleware pour gérer les sessions
+// Configuration de la session
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "default-secret",
-    resave: true,
+    secret: process.env.SESSION_SECRET || "default-session-secret",
+    resave: false,
     saveUninitialized: true,
-    cookie: {
-      secure: process.env.NODE_ENV === "production",
-      httpOnly: true,
-      sameSite: "None",
-    },
   })
 );
 
-// Initialiser Passport
+// Initialisation de Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Configurer l'authentification Azure AD
+// Configuration de la stratégie Azure AD
 passport.use(
   new OIDCStrategy(
     {
-      identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/.well-known/openid-configuration`,
+      identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/v2.0/.well-known/openid-configuration`,
       clientID: process.env.CLIENT_ID,
       clientSecret: process.env.CLIENT_SECRET,
       responseType: "code",
       responseMode: "query",
-      redirectUrl: process.env.REDIRECT_URI,  // Doit pointer vers votre endpoint de callback
-      allowHttpForRedirectUrl: true, // Seulement en local pour HTTP
+      redirectUrl: process.env.REDIRECT_URI,
+      scope: ["openid", "profile", "email"],
       passReqToCallback: false,
-      scope: ["profile", "email"],
     },
     (iss, sub, profile, accessToken, refreshToken, done) => {
-      return done(null, profile); // Stocker l'utilisateur dans la session
+      // Enregistrer l'utilisateur dans la session
+      return done(null, profile);
     }
   )
 );
 
-// Routes pour la gestion de l'authentification
-app.get("/login", (req, res) => {
-  res.send('<a href="/auth/openid">Login with Azure AD</a>');
-});
+// Sérialisation/desérialisation utilisateur
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((obj, done) => done(null, obj));
 
+// Route pour démarrer l'authentification
 app.get(
-  "/auth/openid",
-  passport.authenticate("azuread-openidconnect", {
-    failureRedirect: "/login",
-  }),
+  "/auth/login",
+  passport.authenticate("azuread-openidconnect", { failureRedirect: "/error" })
+);
+
+// Callback après l'authentification
+app.get(
+  "/auth/callback",
+  passport.authenticate("azuread-openidconnect", { failureRedirect: "/error" }),
   (req, res) => {
-    res.json(req.user); // Renvoie directement l'utilisateur après une authentification réussie
+    res.redirect("/profile"); // Rediriger vers /profile après connexion
   }
 );
 
-app.get("/auth/openid/return", 
-  passport.authenticate("azuread-openidconnect", { failureRedirect: "/login" }), 
-  (req, res) => {
-    res.json(req.user);  // Renvoie l'utilisateur au frontend
+// Route pour obtenir les données utilisateur
+app.get("/profile", (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: "Non authentifié" });
   }
-);
-
-// Définir le port
-const port = process.env.PORT || 3001;
-app.listen(port, () => {
-  console.log(`Server started on http://localhost:${port}`);
+  res.json(req.user); // Retourner les données utilisateur
 });
+
+// Déconnexion
+app.get("/auth/logout", (req, res) => {
+  req.logout(() => {
+    res.redirect("/");
+  });
+});
+
+// Lancer le serveur
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`API en cours d'exécution sur http://localhost:${PORT}`));
