@@ -1,83 +1,69 @@
-const express = require("express");
-const session = require("express-session");
-const passport = require("passport");
-const { OIDCStrategy } = require("passport-azure-ad");
-const dotenv = require("dotenv");
-const cors = require("cors");
+const express = require('express');
+const passport = require('passport');
+const { OIDCStrategy } = require('passport-azure-ad');
+const dotenv = require('dotenv');
+const cors = require('cors');
+const jwt = require('jsonwebtoken');
 
 // Charger les variables d'environnement
 dotenv.config();
 
 const app = express();
-app.use(cors()); // Permettre les requêtes cross-origin entre le frontend et le backend
 
-// Configuration de la session
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "default-session-secret",
-    resave: false,
-    saveUninitialized: true,
-  })
-);
+// Configurer CORS pour autoriser le frontend à communiquer avec l'API
+app.use(cors({
+  origin: "https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net", // L'URL de ton frontend React
+  credentials: true
+}));
 
-// Initialisation de Passport
-app.use(passport.initialize());
-app.use(passport.session());
+// Configuration de la stratégie OIDC pour Azure AD
+passport.use(new OIDCStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/v2.0/.well-known/openid-configuration`,
+    responseType: 'code',
+    responseMode: 'query',
+    redirectUrl: process.env.REDIRECT_URI, // URL de redirection après l'authentification
+    allowHttpForRedirectUrl: true,  // Utiliser http pour des tests en local
+    passReqToCallback: true,
+  },
+  function (req, iss, sub, profile, accessToken, refreshToken, done) {
+    return done(null, profile);
+  }
+));
 
-// Configuration de la stratégie Azure AD
-passport.use(
-  new OIDCStrategy(
-    {
-      identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/v2.0/.well-known/openid-configuration`,
-      clientID: process.env.CLIENT_ID,
-      clientSecret: process.env.CLIENT_SECRET,
-      responseType: "code",
-      responseMode: "query",
-      redirectUrl: process.env.REDIRECT_URI,
-      scope: ["openid", "profile", "email"],
-      passReqToCallback: false,
-    },
-    (iss, sub, profile, accessToken, refreshToken, done) => {
-      // Enregistrer l'utilisateur dans la session
-      return done(null, profile);
+// Middleware pour vérifier les tokens JWT
+const checkJwt = (req, res, next) => {
+  const token = req.headers['authorization'];
+
+  if (!token) {
+    return res.status(403).send('Token is required');
+  }
+
+  jwt.verify(token, process.env.SESSION_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).send('Invalid Token');
     }
-  )
-);
-
-// Sérialisation/desérialisation utilisateur
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((obj, done) => done(null, obj));
-
-// Route pour démarrer l'authentification
-app.get(
-  "/auth/login",
-  passport.authenticate("azuread-openidconnect", { failureRedirect: "/error" })
-);
-
-// Callback après l'authentification
-app.get(
-  "/auth/callback",
-  passport.authenticate("azuread-openidconnect", { failureRedirect: "/error" }),
-  (req, res) => {
-    res.redirect("/profile"); // Rediriger vers /profile après connexion
-  }
-);
-
-// Route pour obtenir les données utilisateur
-app.get("/profile", (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ error: "Non authentifié" });
-  }
-  res.json(req.user); // Retourner les données utilisateur
-});
-
-// Déconnexion
-app.get("/auth/logout", (req, res) => {
-  req.logout(() => {
-    res.redirect("/");
+    req.user = decoded;
+    next();
   });
+};
+
+// Routes de l'API
+app.get('/api/protected', checkJwt, (req, res) => {
+  res.json({ message: 'Protected content accessed successfully' });
 });
 
-// Lancer le serveur
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`API en cours d'exécution sur http://localhost:${PORT}`));
+// Authentification avec Azure AD (utilisé pour obtenir le token)
+app.get('/auth/login', passport.authenticate('azure_ad_oauth2'));
+
+// Callback après l'authentification réussie
+app.get('/auth/callback', passport.authenticate('azure_ad_oauth2', {
+  failureRedirect: '/',
+  successRedirect: '/api/protected',
+}));
+
+// Démarrer le serveur
+app.listen(process.env.PORT, () => {
+  console.log(`Server running on port ${process.env.PORT}`);
+});
