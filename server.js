@@ -1,32 +1,75 @@
-const express = require("express");
-const { expressjwt: jwt } = require("express-jwt");  // Modification ici pour s'assurer de la bonne méthode d'importation
-const jwksRsa = require("jwks-rsa");
+require('dotenv').config();
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
+const bodyParser = require('body-parser');
 
 const app = express();
+app.use(bodyParser.json());
 
-// Remplace {tenantId} par ton propre Tenant ID
-const tenantId = '3b644da5-0210-4e60-b8dc-0beec1614542';  // Remplace par ton propre Tenant ID
+// Configuration CORS
+const allowedOrigins = ['https://<votre-url-front>', 'http://localhost:3000'];
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 
-// Configuration du middleware JWT pour valider les jetons
-const jwtCheck = jwt({
-  secret: jwksRsa.expressJwtSecret({
-    jwksUri: `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`,  // Ton URI JWKS
-  }),
-  audience: 'api://BackendApp',  // Ton audience de l'API
-  issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,  // Ton issuer
-  algorithms: ['RS256'],  // L'algorithme utilisé pour signer le JWT
+// Config Azure AD
+const CLIENT_ID = 'b4a2a829-d4ce-49b9-9341-22995e0476ba';
+const CLIENT_SECRET = process.env.CLIENT_SECRET; // Stockez ce secret dans .env
+const REDIRECT_URI = 'https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net/auth/callback';
+const AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
+const TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+
+// Endpoint pour rediriger vers Azure OAuth
+app.get('/auth/login', (req, res) => {
+  const authUrl = `${AUTH_URL}?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(
+    REDIRECT_URI
+  )}&response_mode=query&scope=openid profile email`;
+  res.redirect(authUrl);
 });
 
-// Appliquer le middleware pour valider le JWT
-// Ici, nous appliquons le middleware `jwtCheck` sur toutes les routes de l'application
-app.use(jwtCheck);
+// Callback pour recevoir le token
+app.get('/auth/callback', async (req, res) => {
+  const { code } = req.query;
 
-// Exemple de route protégée
-app.get("/api/data", (req, res) => {
-  res.json({ message: "Données sécurisées" });
+  try {
+    const tokenResponse = await axios.post(
+      TOKEN_URL,
+      new URLSearchParams({
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        redirect_uri: REDIRECT_URI,
+        grant_type: 'authorization_code',
+        code,
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    const { access_token, id_token } = tokenResponse.data;
+
+    // Retourne les tokens au client
+    res.json({ access_token, id_token });
+  } catch (error) {
+    console.error('Erreur lors de la récupération du token', error.response.data);
+    res.status(500).send('Erreur lors de la récupération du token');
+  }
 });
 
-// Démarrer l'application sur le port 3000
-app.listen(3000, () => {
-  console.log("API backend en écoute sur le port 3000");
+// Endpoint pour exposer les données utilisateur
+app.get('/user-info', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).send('Token manquant');
+
+  try {
+    const userResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    res.json(userResponse.data);
+  } catch (error) {
+    console.error('Erreur lors de la récupération des informations utilisateur', error.response.data);
+    res.status(500).send('Erreur lors de la récupération des informations utilisateur');
+  }
 });
+
+// Lancement du serveur
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`API démarrée sur https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net`));
