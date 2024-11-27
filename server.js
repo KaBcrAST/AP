@@ -1,101 +1,68 @@
-require('dotenv').config();
-const express = require('express');
-const session = require('express-session');
-const passport = require('passport');
-const { BearerStrategy } = require('passport-azure-ad');
+require("dotenv").config();
+const express = require("express");
+const axios = require("axios");
+const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configurer la session
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: true,
-    cookie: { secure: false }, // Mettre `secure: true` en production si HTTPS est activé
-  })
-);
+// Variables d'environnement
+const { CLIENT_ID, CLIENT_SECRET, TENANT_ID, REDIRECT_URI } = process.env;
 
-// Configurer Passport pour OAuth
-passport.use(
-  new BearerStrategy(
-    {
-      identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/v2.0/.well-known/openid-configuration`,
-      clientID: process.env.CLIENT_ID,
-      audience: process.env.CLIENT_ID,
-      validateIssuer: true,
-      loggingLevel: 'info',
-    },
-    (token, done) => {
-      return done(null, token, null);
-    }
-  )
-);
-
-app.use(passport.initialize());
-app.use(passport.session());
-
-// Middleware pour parsing des JSON
+// Middleware pour gérer les CORS
+app.use(cors());
 app.use(express.json());
 
-// Routes de base
-app.get('/', (req, res) => {
-  res.send('API Node.js est en cours d\'exécution');
+// Endpoint principal
+app.get("/", (req, res) => {
+  res.send("API Node.js avec Azure AD OAuth2.0");
 });
 
-// Route de connexion
-app.get('/auth/login', (req, res) => {
-  const authUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/authorize` +
-    `?client_id=${process.env.CLIENT_ID}` +
-    `&response_type=code` +
-    `&redirect_uri=${process.env.REDIRECT_URI}` +
-    `&response_mode=query` +
-    `&scope=openid profile email`;
-
+// Endpoint pour rediriger vers Azure AD pour l'authentification
+app.get("/auth/login", (req, res) => {
+  const authUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize?` +
+    `client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(
+      REDIRECT_URI
+    )}&response_mode=query&scope=openid profile email offline_access`;
   res.redirect(authUrl);
 });
 
-// Route de callback
-app.get('/auth/callback', async (req, res) => {
-  const axios = require('axios');
+// Endpoint pour gérer le callback après authentification
+app.get("/auth/callback", async (req, res) => {
   const { code } = req.query;
 
   if (!code) {
-    return res.status(400).send('Code d\'authentification manquant.');
+    return res.status(400).send("Code d'autorisation manquant.");
   }
 
   try {
-    const response = await axios.post(
-      `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`,
+    const tokenResponse = await axios.post(
+      `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
       new URLSearchParams({
-        client_id: process.env.CLIENT_ID,
-        client_secret: process.env.CLIENT_SECRET,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: process.env.REDIRECT_URI,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        grant_type: "authorization_code",
+        code: code,
+        redirect_uri: REDIRECT_URI,
       }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
 
-    req.session.token = response.data.access_token;
-    res.redirect('/auth/success');
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Erreur lors de l\'authentification.');
+    res.json({
+      accessToken: tokenResponse.data.access_token,
+      idToken: tokenResponse.data.id_token,
+      refreshToken: tokenResponse.data.refresh_token,
+    });
+  } catch (error) {
+    console.error("Erreur lors de l'échange du code :", error.response?.data || error.message);
+    res.status(500).json({
+      error: "Erreur lors de l'échange du code",
+      details: error.response?.data || error.message,
+    });
   }
 });
 
-// Route de succès
-app.get('/auth/success', (req, res) => {
-  if (!req.session.token) {
-    return res.status(401).send('Utilisateur non connecté.');
-  }
-
-  res.send({ message: 'Authentification réussie', token: req.session.token });
-});
-
-// Lancer le serveur
+// Démarrage du serveur
 app.listen(PORT, () => {
-  console.log(`API en cours d'exécution sur le port ${PORT}`);
+  console.log(`Serveur lancé sur le port ${PORT}`);
 });
