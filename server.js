@@ -1,69 +1,101 @@
+require('dotenv').config();
 const express = require('express');
+const session = require('express-session');
 const passport = require('passport');
-const { OIDCStrategy } = require('passport-azure-ad');
-const dotenv = require('dotenv');
-const cors = require('cors');
-const jwt = require('jsonwebtoken');
-
-// Charger les variables d'environnement
-dotenv.config();
+const { BearerStrategy } = require('passport-azure-ad');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Configurer CORS pour autoriser le frontend à communiquer avec l'API
-app.use(cors({
-  origin: "https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net", // L'URL de ton frontend React
-  credentials: true
-}));
+// Configurer la session
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: true,
+    cookie: { secure: false }, // Mettre `secure: true` en production si HTTPS est activé
+  })
+);
 
-// Configuration de la stratégie OIDC pour Azure AD
-passport.use(new OIDCStrategy({
-    clientID: process.env.CLIENT_ID,
-    clientSecret: process.env.CLIENT_SECRET,
-    identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/v2.0/.well-known/openid-configuration`,
-    responseType: 'code',
-    responseMode: 'query',
-    redirectUrl: process.env.REDIRECT_URI, // URL de redirection après l'authentification
-    allowHttpForRedirectUrl: true,  // Utiliser http pour des tests en local
-    passReqToCallback: true,
-  },
-  function (req, iss, sub, profile, accessToken, refreshToken, done) {
-    return done(null, profile);
-  }
-));
-
-// Middleware pour vérifier les tokens JWT
-const checkJwt = (req, res, next) => {
-  const token = req.headers['authorization'];
-
-  if (!token) {
-    return res.status(403).send('Token is required');
-  }
-
-  jwt.verify(token, process.env.SESSION_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(401).send('Invalid Token');
+// Configurer Passport pour OAuth
+passport.use(
+  new BearerStrategy(
+    {
+      identityMetadata: `https://login.microsoftonline.com/${process.env.TENANT_ID}/v2.0/.well-known/openid-configuration`,
+      clientID: process.env.CLIENT_ID,
+      audience: process.env.CLIENT_ID,
+      validateIssuer: true,
+      loggingLevel: 'info',
+    },
+    (token, done) => {
+      return done(null, token, null);
     }
-    req.user = decoded;
-    next();
-  });
-};
+  )
+);
 
-// Routes de l'API
-app.get('/api/protected', checkJwt, (req, res) => {
-  res.json({ message: 'Protected content accessed successfully' });
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Middleware pour parsing des JSON
+app.use(express.json());
+
+// Routes de base
+app.get('/', (req, res) => {
+  res.send('API Node.js est en cours d\'exécution');
 });
 
-// Authentification avec Azure AD (utilisé pour obtenir le token)
-app.get('/auth/login', passport.authenticate('azure_ad_oauth2'));
+// Route de connexion
+app.get('/auth/login', (req, res) => {
+  const authUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/authorize` +
+    `?client_id=${process.env.CLIENT_ID}` +
+    `&response_type=code` +
+    `&redirect_uri=${process.env.REDIRECT_URI}` +
+    `&response_mode=query` +
+    `&scope=openid profile email`;
 
-// Callback après l'authentification réussie
-app.get('/auth/callback', passport.authenticate('azure_ad_oauth2', {
-  failureRedirect: '/',
-  successRedirect: '/api/protected',
-}));
+  res.redirect(authUrl);
+});
 
-// Démarrer le serveur
-app.listen(process.env.PORT, () => {
-  console.log(`Server running on port ${process.env.PORT}`);
+// Route de callback
+app.get('/auth/callback', async (req, res) => {
+  const axios = require('axios');
+  const { code } = req.query;
+
+  if (!code) {
+    return res.status(400).send('Code d\'authentification manquant.');
+  }
+
+  try {
+    const response = await axios.post(
+      `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`,
+      new URLSearchParams({
+        client_id: process.env.CLIENT_ID,
+        client_secret: process.env.CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: process.env.REDIRECT_URI,
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    req.session.token = response.data.access_token;
+    res.redirect('/auth/success');
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Erreur lors de l\'authentification.');
+  }
+});
+
+// Route de succès
+app.get('/auth/success', (req, res) => {
+  if (!req.session.token) {
+    return res.status(401).send('Utilisateur non connecté.');
+  }
+
+  res.send({ message: 'Authentification réussie', token: req.session.token });
+});
+
+// Lancer le serveur
+app.listen(PORT, () => {
+  console.log(`API en cours d'exécution sur le port ${PORT}`);
 });
