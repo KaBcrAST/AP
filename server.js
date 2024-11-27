@@ -79,5 +79,5 @@ app.get("/auth/logout", (req, res) => {
 });
 
 // Lancer le serveur
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`API en cours d'exécution sur http://localhost:${PORT}`));
