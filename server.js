@@ -1,69 +1,69 @@
-require("dotenv").config();
-const express = require("express");
-const axios = require("axios");
-const cors = require("cors");
-
+const express = require('express');
+const axios = require('axios');
+const qs = require('querystring');
+const passport = require('passport');
+const { BearerStrategy } = require('passport-azure-ad');
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// Variables d'environnement
-const { CLIENT_ID, CLIENT_SECRET, TENANT_ID, REDIRECT_URI } = process.env;
+const CLIENT_ID = 'b4a2a829-d4ce-49b9-9341-22995e0476ba';
+const CLIENT_SECRET = 'votre-secret-client';  // Remplacez par votre secret client
+const TENANT_ID = '3b644da5-0210-4e60-b8dc-0beec1614542';
+const REDIRECT_URI = 'https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net/auth/callback';
 
-// Middleware pour gérer les CORS
-app.use(cors());
-app.use(express.json());
+// Configuration de Passport pour Azure AD
+passport.use(new BearerStrategy({
+  identityMetadata: `https://login.microsoftonline.com/${TENANT_ID}/.well-known/openid-configuration`,
+  clientID: CLIENT_ID,
+  validateIssuer: true,
+  issuer: `https://sts.windows.net/${TENANT_ID}/`,
+  passReqToCallback: false
+}, (token, done) => {
+  return done(null, token);
+}));
 
-// Endpoint principal
-app.get("/", (req, res) => {
-  res.send("API Node.js avec Azure AD OAuth2.0");
-});
+app.use(passport.initialize());
 
-// Endpoint pour rediriger vers Azure AD pour l'authentification
-app.get("/auth/login", (req, res) => {
+// Endpoint pour démarrer l'authentification OAuth
+app.post('/api/auth/login', (req, res) => {
   const authUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize?` +
-    `client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(
-      REDIRECT_URI
-    )}&response_mode=query&scope=openid profile email offline_access`;
-  res.redirect(authUrl);
+    `client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&` +
+    `response_mode=query&scope=openid profile email offline_access`;
+
+  // Redirige vers Azure AD
+  res.json({ authUrl });
 });
 
-// Endpoint pour gérer le callback après authentification avec PKCE
-app.get("/auth/callback", async (req, res) => {
-  const { code, code_verifier } = req.query;
-
-  if (!code || !code_verifier) {
-    return res.status(400).send("Code d'autorisation ou code_verifier manquant.");
-  }
+// Endpoint pour gérer le callback d'Azure AD
+app.get('/auth/callback', async (req, res) => {
+  const code = req.query.code;  // Récupère le code d'autorisation
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
 
   try {
-    const tokenResponse = await axios.post(
-      `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
-      new URLSearchParams({
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
-        grant_type: "authorization_code",
-        code: code,
-        redirect_uri: REDIRECT_URI,
-        code_verifier: code_verifier,  // Ajouter le code_verifier ici
-      }),
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    );
+    // Échange du code contre un access_token
+    const response = await axios.post(tokenUrl, qs.stringify({
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      code: code,
+      redirect_uri: REDIRECT_URI,
+      grant_type: 'authorization_code',
+    }));
 
-    res.json({
-      accessToken: tokenResponse.data.access_token,
-      idToken: tokenResponse.data.id_token,
-      refreshToken: tokenResponse.data.refresh_token,
-    });
+    const accessToken = response.data.access_token;
+
+    // Renvoie l'access token à React
+    res.json({ accessToken });
   } catch (error) {
-    console.error("Erreur lors de l'échange du code :", error.response?.data || error.message);
-    res.status(500).json({
-      error: "Erreur lors de l'échange du code",
-      details: error.response?.data || error.message,
-    });
+    console.error('Erreur lors de l\'échange du code:', error);
+    res.status(500).json({ error: 'Erreur d\'authentification' });
   }
 });
 
-// Démarrage du serveur
-app.listen(PORT, () => {
-  console.log(`Serveur lancé sur le port ${PORT}`);
+// Exemple d'endpoint sécurisé
+app.get('/api/protected', passport.authenticate('oauth-bearer', { session: false }), (req, res) => {
+  res.json({ message: 'Accès protégé réussi' });
+});
+
+// Lancer le serveur
+app.listen(3001, () => {
+  console.log('Backend API démarré sur http://localhost:3001');
 });
