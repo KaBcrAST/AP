@@ -19,10 +19,9 @@ app.use(cors({
 
 // Point d'entrée pour commencer le processus de login (redirection vers Azure AD)
 app.get('/auth/login', (req, res) => {
-  // Générer un code_verifier et un code_challenge
-  const codeVerifier = req.query.code_verifier;
+  const tenantId = '3b644da5-0210-4e60-b8dc-0beec1614542';  // Hardcodé tenant ID
+  const authUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`;
 
-  const authUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/authorize`;
   const params = querystring.stringify({
     client_id: process.env.CLIENT_ID,
     response_type: 'code',
@@ -47,8 +46,9 @@ app.get('/auth/openid/return', async (req, res) => {
   }
 
   try {
+    const tenantId = '3b644da5-0210-4e60-b8dc-0beec1614542';  // Hardcodé tenant ID
     // Échanger le code contre un token avec PKCE
-    const tokenUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`;
+    const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
 
     const tokenResponse = await axios.post(tokenUrl, querystring.stringify({
       client_id: process.env.CLIENT_ID,
