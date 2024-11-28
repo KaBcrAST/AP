@@ -3,7 +3,8 @@ const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const crypto = require('crypto');  // Utilisé pour générer PKCE
+const crypto = require('crypto');
+const session = require('express-session');  // Middleware pour gérer les sessions
 
 const app = express();
 app.use(bodyParser.json());
@@ -11,6 +12,13 @@ app.use(bodyParser.json());
 // Configuration CORS
 const allowedOrigins = ['https://frontend.example.com', 'http://localhost:3000']; // Remplacez par votre URL frontend
 app.use(cors({ origin: allowedOrigins, credentials: true }));
+
+// Middleware de session pour stocker le code verifier
+app.use(session({
+  secret: 'votre-clé-secrète',  // Utiliser une clé secrète pour signer la session
+  resave: false,
+  saveUninitialized: true
+}));
 
 // Config Azure AD
 const CLIENT_ID = 'b4a2a829-d4ce-49b9-9341-22995e0476ba';  // Remplacez par votre ID client
@@ -57,7 +65,6 @@ app.get('/auth/openid/return', async (req, res) => {
   }
 
   try {
-    // Échanger le code d’autorisation contre un token d’accès
     const tokenResponse = await axios.post(
       TOKEN_URL,
       new URLSearchParams({
@@ -70,11 +77,26 @@ app.get('/auth/openid/return', async (req, res) => {
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
 
-    const { access_token } = tokenResponse.data;
-    res.json({ access_token });
+    const { access_token, id_token, refresh_token } = tokenResponse.data;
+
+    // Log de la réponse pour vérifier si tout est correct
+    console.log("Token Response:", tokenResponse.data);
+
+    res.json({ access_token, id_token, refresh_token });
   } catch (error) {
-    console.error('Erreur lors de la récupération du token', error.response?.data || error.message);
-    res.status(500).send('Erreur lors de la récupération du token');
+    // Capture l'erreur complète et affiche-la dans la console pour le débogage
+    console.error('Erreur lors de la récupération du token:', error.response?.data || error.message);
+
+    if (error.response) {
+      // Si une réponse d'erreur est renvoyée par Azure AD, on la log également
+      res.status(error.response.status).json({
+        message: 'Erreur de récupération du token',
+        error: error.response.data,
+      });
+    } else {
+      // Si une erreur inconnue survient (par exemple, un timeout), on la gère ici
+      res.status(500).json({ message: 'Erreur inconnue lors de la récupération du token' });
+    }
   }
 });
 
