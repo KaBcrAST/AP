@@ -14,7 +14,8 @@ const allowedOrigins = ['https://<votre-url-front>', 'http://localhost:3000'];
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 // Configuration Azure AD
-const CLIENT_ID = 'b4a2a829-d4ce-49b9-9341-22995e0476ba';
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;  // Client secret récupéré
 const REDIRECT_URI = 'https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net/auth/openid/return';
 const AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
@@ -54,11 +55,12 @@ app.get('/auth/openid/return', async (req, res) => {
   }
 
   try {
-    // Demander le token en utilisant le code d'autorisation et le code verifier (sans client secret)
+    // Demander le token en utilisant le code d'autorisation, le code verifier et le client secret
     const tokenResponse = await axios.post(
       TOKEN_URL,
       new URLSearchParams({
         client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,  // Ajouter le client secret ici
         redirect_uri: REDIRECT_URI,
         grant_type: 'authorization_code',
         code: code,  // Le code d’autorisation reçu
@@ -72,7 +74,7 @@ app.get('/auth/openid/return', async (req, res) => {
     // Log de la réponse pour vérifier si tout est correct
     console.log("Token Response:", tokenResponse.data);
 
-    // Retourne les tokens au client
+    // Retourner les tokens au client
     res.json({ access_token, id_token, refresh_token });
   } catch (error) {
     // Capture l'erreur complète et affiche-la dans la console pour le débogage
