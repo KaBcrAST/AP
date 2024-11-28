@@ -1,114 +1,92 @@
+require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const cors = require('cors');
-const dotenv = require('dotenv');
-const querystring = require('querystring');
-const crypto = require('crypto');
-
-// Charger les variables d'environnement
-dotenv.config();
+const session = require('express-session');
 
 const app = express();
-const port = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 
-// Autoriser CORS (ajustez l'URL du frontend en production)
-app.use(cors({
-  origin: 'http://localhost:3000', // URL de votre frontend
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+// Middleware pour les sessions
+app.use(
+    session({
+        secret: process.env.SESSION_SECRET,
+        resave: false,
+        saveUninitialized: true,
+    })
+);
 
-// Générateur de code challenge et code verifier pour PKCE
-const generatePKCECodes = () => {
-  const codeVerifier = crypto.randomBytes(64).toString('hex');
-  const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
-  return { codeVerifier, codeChallenge };
-};
-
-// Stocker les codes PKCE en mémoire (remplacer par une base de données dans un vrai projet)
-const pkceCodes = {};
-
-// Point d'entrée pour commencer le processus de login (redirection vers Azure AD)
+// Route pour rediriger vers Azure AD pour l'authentification
 app.get('/auth/login', (req, res) => {
-  const { codeChallenge, codeVerifier } = generatePKCECodes();
-  const state = crypto.randomBytes(16).toString('hex'); // Générer un état unique pour la session
-
-  // Stocker le code verifier et l'état (en production, utilisez une session ou une base de données)
-  pkceCodes[state] = codeVerifier;
-
-  const authUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/authorize`;
-  const params = querystring.stringify({
-    client_id: process.env.CLIENT_ID,
-    response_type: 'code',
-    redirect_uri: process.env.REDIRECT_URI,
-    scope: 'openid profile email',
-    code_challenge: codeChallenge,
-    code_challenge_method: 'S256',
-    state: state,
-  });
-
-  // Rediriger l'utilisateur vers Azure AD pour se connecter
-  res.redirect(`${authUrl}?${params}`);
+    const redirectUri = encodeURIComponent(process.env.REDIRECT_URI);
+    const authUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/authorize` +
+        `?client_id=${process.env.CLIENT_ID}` +
+        `&response_type=code` +
+        `&redirect_uri=${redirectUri}` +
+        `&response_mode=query` +
+        `&scope=openid profile email User.Read` +
+        `&state=12345`;
+    res.redirect(authUrl);
 });
 
-// Route pour récupérer l'access token après la redirection d’Azure
-app.get('/auth/openid/return', async (req, res) => {
-  const { code, state } = req.query;
+// Callback après l'authentification Azure
+app.get('/auth/callback', async (req, res) => {
+    const { code } = req.query;
 
-  // Vérifier que nous avons un code et un état valides
-  if (!code || !state || !pkceCodes[state]) {
-    return res.status(400).json({ error: 'Code ou état manquant/invalid dans la requête.' });
-  }
+    if (!code) {
+        return res.status(400).json({ error: 'Code de vérification manquant.' });
+    }
 
-  try {
-    // Échanger le code contre un token
-    const tokenUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`;
-    const tokenResponse = await axios.post(tokenUrl, querystring.stringify({
-      client_id: process.env.CLIENT_ID,
-      client_secret: process.env.CLIENT_SECRET,
-      code: code,
-      grant_type: 'authorization_code',
-      redirect_uri: process.env.REDIRECT_URI,
-      code_verifier: pkceCodes[state],
-    }), {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    });
+    try {
+        // Échanger le code contre un token d'accès
+        const tokenResponse = await axios.post(
+            `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`,
+            new URLSearchParams({
+                client_id: process.env.CLIENT_ID,
+                client_secret: process.env.CLIENT_SECRET,
+                grant_type: 'authorization_code',
+                code,
+                redirect_uri: process.env.REDIRECT_URI,
+            }),
+            {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+            }
+        );
 
-    // Supprimer le code verifier utilisé
-    delete pkceCodes[state];
+        // Sauvegarde du token d'accès en session
+        req.session.accessToken = tokenResponse.data.access_token;
 
-    const { access_token } = tokenResponse.data;
-
-    // Utiliser le token pour récupérer les informations utilisateur via Microsoft Graph
-    const userInfo = await getUserInfoFromGraph(access_token);
-
-    res.json(userInfo); // Retourner les données utilisateur au frontend
-  } catch (error) {
-    console.error('Erreur lors de la récupération du token ou des informations utilisateur:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Une erreur est survenue lors de l\'authentification.' });
-  }
+        res.json({ message: 'Authentification réussie !' });
+    } catch (err) {
+        console.error('Erreur lors de l\'échange du code :', err.response?.data || err.message);
+        res.status(500).json({ error: 'Une erreur est survenue lors de l\'authentification.' });
+    }
 });
 
-// Fonction pour interroger l'API Microsoft Graph et obtenir les infos utilisateur
-const getUserInfoFromGraph = async (token) => {
-  try {
-    const response = await axios.get(process.env.API_URL, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+// Route pour obtenir les données utilisateur depuis Microsoft Graph
+app.get('/api/user', async (req, res) => {
+    const accessToken = req.session.accessToken;
 
-    // Retourner les données utilisateur
-    return response.data;
-  } catch (error) {
-    console.error('Erreur lors de l\'appel Microsoft Graph:', error.response?.data || error.message);
-    throw new Error('Impossible de récupérer les informations utilisateur depuis Microsoft Graph.');
-  }
-};
+    if (!accessToken) {
+        return res.status(401).json({ error: 'Utilisateur non authentifié.' });
+    }
 
-// Démarrer le serveur
-app.listen(port, () => {
-  console.log(`Serveur démarré sur http://localhost:${port}`);
+    try {
+        const userResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+            },
+        });
+
+        res.json(userResponse.data);
+    } catch (err) {
+        console.error('Erreur lors de la récupération des données utilisateur :', err.response?.data || err.message);
+        res.status(500).json({ error: 'Impossible de récupérer les données utilisateur.' });
+    }
+});
+
+// Démarrage du serveur
+app.listen(PORT, () => {
+    console.log(`Serveur démarré sur http://localhost:${PORT}`);
 });
