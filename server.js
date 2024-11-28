@@ -5,7 +5,6 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const session = require('express-session');
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken'); // Importation pour décoder l'id_token
 
 const app = express();
 app.use(bodyParser.json());
@@ -15,8 +14,8 @@ const allowedOrigins = ['https://<votre-url-front>', 'http://localhost:3000'];
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 // Configuration Azure AD
-const CLIENT_ID = 'b4a2a829-d4ce-49b9-9341-22995e0476ba';
-const CLIENT_SECRET = 'Bug8Q~dZ0wRCD8QK5_texSqX6C739vPeoDQ~gdi9'; // Votre secret client ici
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;  // Client secret récupéré
 const REDIRECT_URI = 'https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net/auth/openid/return';
 const AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
@@ -56,12 +55,12 @@ app.get('/auth/openid/return', async (req, res) => {
   }
 
   try {
-    // Demander le token en utilisant le code d'autorisation et le code verifier
+    // Demander le token en utilisant le code d'autorisation, le code verifier et le client secret
     const tokenResponse = await axios.post(
       TOKEN_URL,
       new URLSearchParams({
         client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET, // Ajout du client_secret
+        client_secret: CLIENT_SECRET,  // Ajouter le client secret ici
         redirect_uri: REDIRECT_URI,
         grant_type: 'authorization_code',
         code: code,  // Le code d’autorisation reçu
@@ -75,7 +74,7 @@ app.get('/auth/openid/return', async (req, res) => {
     // Log de la réponse pour vérifier si tout est correct
     console.log("Token Response:", tokenResponse.data);
 
-    // Retourne les tokens au client
+    // Retourner les tokens au client
     res.json({ access_token, id_token, refresh_token });
   } catch (error) {
     // Capture l'erreur complète et affiche-la dans la console pour le débogage
@@ -94,31 +93,23 @@ app.get('/auth/openid/return', async (req, res) => {
   }
 });
 
-// Fonction pour décoder l'id_token et afficher les informations de l'utilisateur
-function decodeIdToken(idToken) {
-  try {
-    const decoded = jwt.decode(idToken);
-    console.log('Decoded ID Token:', decoded);
-  } catch (error) {
-    console.error('Error decoding ID token:', error);
-  }
-}
+// Endpoint pour obtenir les informations de l'utilisateur avec le token d'accès
+app.get('/user-info', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).send('Token manquant');
 
-// Exemple pour obtenir les informations de l'utilisateur avec l'access_token
-async function getUserInfo(accessToken) {
   try {
-    const response = await axios.get('https://graph.microsoft.com/v1.0/me', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-      }
+    const userResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+      headers: { Authorization: `Bearer ${token}` },
     });
-    console.log('User Info:', response.data);
+
+    res.json(userResponse.data);
   } catch (error) {
-    console.error('Error fetching user info:', error);
+    console.error('Erreur lors de la récupération des informations utilisateur', error.response.data);
+    res.status(500).send('Erreur lors de la récupération des informations utilisateur');
   }
-}
+});
 
 // Démarrage du serveur
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`API démarrée sur https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net`));
-
