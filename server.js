@@ -1,143 +1,88 @@
-require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const bodyParser = require('body-parser');
-const session = require('express-session');
-const crypto = require('crypto');
+const dotenv = require('dotenv');
+const querystring = require('querystring');
+
+// Charger les variables d'environnement
+dotenv.config();
 
 const app = express();
-app.use(bodyParser.json());
+const port = process.env.PORT || 5000;
 
-// Configuration CORS
-const allowedOrigins = ['https://<votre-url-front>', 'http://localhost:3000'];
-app.use(cors({ origin: allowedOrigins, credentials: true }));
-
-// Configuration Azure AD
-const CLIENT_ID = process.env.CLIENT_ID;
-const CLIENT_SECRET = process.env.CLIENT_SECRET;  // Client secret récupéré
-const REDIRECT_URI = 'https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net/auth/openid/return';
-const AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
-const TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
-
-// Utilisation des sessions pour stocker le code verifier généré
-app.use(session({
-  secret: 'votre-secret-de-session',
-  resave: false,
-  saveUninitialized: true,
+// Autoriser CORS (ajustez l'URL du frontend en production)
+app.use(cors({
+  origin: 'http://localhost:3000', // URL de votre frontend en développement ou production
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Endpoint pour démarrer l'authentification OAuth
+// Point d'entrée pour commencer le processus de login (redirection vers Azure AD)
 app.get('/auth/login', (req, res) => {
-  // Génération du code verifier
-  const codeVerifier = crypto.randomBytes(32).toString('hex');
-  req.session.codeVerifier = codeVerifier;
+  const authUrl = `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/authorize`;
+  const params = querystring.stringify({
+    client_id: process.env.AZURE_CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: process.env.AZURE_REDIRECT_URI,
+    scope: 'openid profile email',
+    state: '12345', // Un paramètre de sécurité (vous pouvez le rendre dynamique)
+  });
 
-  // Génération du code challenge basé sur le code verifier (PKCE)
-  const codeChallenge = crypto.createHash('sha256')
-    .update(codeVerifier)
-    .digest('base64url');
-
-  const authUrl = `${AUTH_URL}?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(
-    REDIRECT_URI
-  )}&response_mode=query&scope=openid profile email&code_challenge=${codeChallenge}&code_challenge_method=S256`;
-
-  res.redirect(authUrl);
+  // Rediriger l'utilisateur vers Azure AD pour se connecter
+  res.redirect(`${authUrl}?${params}`);
 });
 
-// Callback pour recevoir le code d'autorisation et récupérer les tokens
+// Route pour récupérer l'access token après la redirection d'Azure
 app.get('/auth/openid/return', async (req, res) => {
   const { code } = req.query;
-  const codeVerifier = req.session.codeVerifier;  // Récupérer le code verifier stocké en session
 
+  // Vérifier que nous avons bien un code
   if (!code) {
-    return res.status(400).send('Code d’autorisation manquant');
+    return res.status(400).json({ error: 'Code manquant dans la requête.' });
   }
 
   try {
-    // Demander le token en utilisant le code d'autorisation, le code verifier et le client secret
-    const tokenResponse = await axios.post(
-      TOKEN_URL,
-      new URLSearchParams({
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,  // Ajouter le client secret ici
-        redirect_uri: REDIRECT_URI,
-        grant_type: 'authorization_code',
-        code: code,  // Le code d’autorisation reçu
-        code_verifier: codeVerifier,  // Le code verifier généré lors de l’authentification
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
+    // Échanger le code contre un token
+    const tokenUrl = `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/token`;
 
-    const { access_token, id_token, refresh_token } = tokenResponse.data;
+    const tokenResponse = await axios.post(tokenUrl, querystring.stringify({
+      client_id: process.env.AZURE_CLIENT_ID,
+      client_secret: process.env.AZURE_CLIENT_SECRET,
+      code: code,
+      grant_type: 'authorization_code',
+      redirect_uri: process.env.AZURE_REDIRECT_URI,
+      scope: 'openid profile email',
+    }));
 
-    // Log de la réponse pour vérifier si tout est correct
-    console.log("Token Response:", tokenResponse.data);
+    const { access_token } = tokenResponse.data;
 
-    // Retourner les tokens au client
-    res.json({ access_token, id_token, refresh_token });
+    // Une fois le token récupéré, utiliser l'API Microsoft Graph pour obtenir les informations utilisateur
+    const userInfo = await getUserInfoFromGraph(access_token);
+
+    res.json(userInfo); // Retourner les données utilisateur au frontend
   } catch (error) {
-    // Capture l'erreur complète et affiche-la dans la console pour le débogage
-    console.error('Erreur lors de la récupération du token:', error.response?.data || error.message);
-
-    if (error.response) {
-      // Si une réponse d'erreur est renvoyée par Azure AD, on la log également
-      res.status(error.response.status).json({
-        message: 'Erreur de récupération du token',
-        error: error.response.data,
-      });
-    } else {
-      // Si une erreur inconnue survient (par exemple, un timeout), on la gère ici
-      res.status(500).json({ message: 'Erreur inconnue lors de la récupération du token' });
-    }
+    console.error('Erreur lors de la récupération du token ou des informations utilisateur:', error);
+    res.status(500).json({ error: 'Une erreur est survenue lors de l\'authentification.' });
   }
 });
 
-// Rafraîchissement du token avec le refresh_token
-app.post('/auth/refresh', async (req, res) => {
-  const { refresh_token } = req.body;
-  if (!refresh_token) {
-    return res.status(400).send('Refresh token manquant');
-  }
-
+// Fonction pour interroger l'API Microsoft Graph et obtenir les infos utilisateur
+const getUserInfoFromGraph = async (token) => {
   try {
-    const tokenResponse = await axios.post(
-      TOKEN_URL,
-      new URLSearchParams({
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
-        grant_type: 'refresh_token',
-        refresh_token: refresh_token,
-        redirect_uri: REDIRECT_URI,
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
-
-    const { access_token, id_token } = tokenResponse.data;
-    res.json({ access_token, id_token });
-  } catch (error) {
-    console.error('Erreur lors du rafraîchissement du token:', error.response?.data || error.message);
-    res.status(500).send('Erreur lors du rafraîchissement du token');
-  }
-});
-
-// Endpoint pour obtenir les informations de l'utilisateur avec le token d'accès
-app.get('/user-info', async (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).send('Token manquant');
-
-  try {
-    const userResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
-      headers: { Authorization: `Bearer ${token}` },
+    const response = await axios.get(process.env.AZURE_API_URL, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     });
 
-    res.json(userResponse.data);
+    // Retourner les données utilisateurs (vous pouvez ajuster les champs selon vos besoins)
+    return response.data;
   } catch (error) {
-    console.error('Erreur lors de la récupération des informations utilisateur', error.response.data);
-    res.status(500).send('Erreur lors de la récupération des informations utilisateur');
+    throw new Error('Impossible de récupérer les informations utilisateur depuis Microsoft Graph.');
   }
-});
+};
 
-// Démarrage du serveur
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`API démarrée sur https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net`));
+// Démarrer le serveur
+app.listen(port, () => {
+  console.log(`Serveur démarré sur http://localhost:${port}`);
+});
