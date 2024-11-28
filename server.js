@@ -1,55 +1,96 @@
 const express = require('express');
-const cors = require('cors');
-const session = require('express-session');
-const { msalInstance } = require('./authConfig');  // Assurez-vous que msalInstance est bien importé
+const { Configuration, PublicClientApplication } = require('@azure/msal-node');
+const axios = require('axios');
+const cookieParser = require('cookie-parser');
+const bodyParser = require('body-parser');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Configuration CORS pour autoriser les demandes depuis ton front-end React
-const corsOptions = {
-  origin: 'https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net', // Remplace par l'URL de ton front-end React
-  methods: 'GET,POST,PUT,DELETE',
-  credentials: true,  // Permet d'envoyer des cookies avec les requêtes
+// Configure MSAL for Azure AD
+const msalConfig = {
+  auth: {
+    clientId: process.env.CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${process.env.TENANT_ID}`,
+    redirectUri: 'https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net/auth/callback', // Update with your redirect URI
+  },
 };
 
-app.use(cors(corsOptions));  // Ajoute le middleware CORS
+const pca = new PublicClientApplication(msalConfig);
 
-// Configuration de la session
-app.use(session({
-  secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: true,
-}));
+// Cookie parser middleware
+app.use(cookieParser());
 
-// Route pour se connecter via Azure
-app.get('/auth/login', (req, res) => {
-  const authUrl = msalInstance.getAuthCodeUrl({
-    ...loginRequest,
-    redirectUri: process.env.REDIRECT_URI,  // Redirection après l'authentification
-  });
-  res.redirect(authUrl);
-});
+// Body parser middleware
+app.use(bodyParser.json());
 
-// Route pour le callback après l'authentification
-app.get('/auth/callback', async (req, res) => {
+app.get('/api/login', async (req, res) => {
   try {
-    const response = await msalInstance.acquireTokenByCode({
-      code: req.query.code,
-      redirectUri: process.env.REDIRECT_URI,
-      clientSecret: process.env.CLIENT_SECRET,
-    });
-    
-    // Sauvegarde le token dans la session
-    req.session.accessToken = response.accessToken;
-    res.redirect('https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net');  // Redirige vers le front-end
+    const authRequest = {
+      scopes: ['user.read'],
+    };
+
+    const loginRedirectUrl = pca.getAuthCodeUrl(authRequest);
+    res.json({ redirectUri: loginRedirectUrl });
   } catch (error) {
-    console.error('Erreur de récupération du token :', error);
-    res.status(500).send('Erreur d\'authentification');
+    console.error(error);
+    res.status(500).send('Une erreur s\'est produite lors de l\'initialisation de la connexion.');
   }
 });
 
-// Démarrage du serveur
+// Route for initiating login flow
+app.get('/login', async (req, res) => {
+  try {
+    const authRequest = {
+      scopes: ['user.read'], // Replace with your required scopes
+    };
+
+    const loginRedirectUrl = pca.getAuthCodeUrl(authRequest);
+    res.redirect(loginRedirectUrl);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('An error occurred during login initiation.');
+  }
+});
+
+// Route for handling authentication callback
+app.get('/auth/callback', async (req, res) => {
+  try {
+    const authCode = req.query.code;
+    const tokenResponse = await pca.acquireTokenByCode({ code: authCode });
+
+    // Store access token in a secure session (e.g., database)
+    const accessToken = tokenResponse.accessToken;
+    // You can implement session management here
+
+    // Redirect user to the application homepage or profile page
+    res.redirect('/profile'); // Replace with your desired redirect path
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('An error occurred during token acquisition.');
+  }
+});
+
+// Route for retrieving user profile (replace with your logic)
+app.get('/profile', async (req, res) => {
+  try {
+    // Retrieve access token from secure session
+    const accessToken = req.cookies.accessToken;
+
+    const userResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    const userInfo = userResponse.data;
+    res.json(userInfo); // Send user information in the response
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('An error occurred while retrieving user profile.');
+  }
+});
+
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`Server listening on port ${port}`);
 });
