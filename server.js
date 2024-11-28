@@ -19,11 +19,11 @@ app.use(cors({
 
 // Point d'entrée pour commencer le processus de login (redirection vers Azure AD)
 app.get('/auth/login', (req, res) => {
-  const authUrl = `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/authorize`;
+  const authUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/authorize`;
   const params = querystring.stringify({
-    client_id: process.env.AZURE_CLIENT_ID,
+    client_id: process.env.CLIENT_ID,
     response_type: 'code',
-    redirect_uri: process.env.AZURE_REDIRECT_URI,
+    redirect_uri: process.env.REDIRECT_URI,
     scope: 'openid profile email',
     state: '12345', // Un paramètre de sécurité (vous pouvez le rendre dynamique)
   });
@@ -43,14 +43,14 @@ app.get('/auth/openid/return', async (req, res) => {
 
   try {
     // Échanger le code contre un token
-    const tokenUrl = `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/token`;
+    const tokenUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`;
 
     const tokenResponse = await axios.post(tokenUrl, querystring.stringify({
-      client_id: process.env.AZURE_CLIENT_ID,
-      client_secret: process.env.AZURE_CLIENT_SECRET,
+      client_id: process.env.CLIENT_ID,
+      client_secret: process.env.CLIENT_SECRET,
       code: code,
       grant_type: 'authorization_code',
-      redirect_uri: process.env.AZURE_REDIRECT_URI,
+      redirect_uri: process.env.REDIRECT_URI,
       scope: 'openid profile email',
     }));
 
@@ -69,7 +69,7 @@ app.get('/auth/openid/return', async (req, res) => {
 // Fonction pour interroger l'API Microsoft Graph et obtenir les infos utilisateur
 const getUserInfoFromGraph = async (token) => {
   try {
-    const response = await axios.get(process.env.AZURE_API_URL, {
+    const response = await axios.get(process.env.API_URL, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
