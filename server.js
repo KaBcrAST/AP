@@ -19,13 +19,18 @@ app.use(cors({
 
 // Point d'entrée pour commencer le processus de login (redirection vers Azure AD)
 app.get('/auth/login', (req, res) => {
+  // Générer un code_verifier et un code_challenge
+  const codeVerifier = req.query.code_verifier;
+
   const authUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/authorize`;
   const params = querystring.stringify({
     client_id: process.env.CLIENT_ID,
     response_type: 'code',
     redirect_uri: process.env.REDIRECT_URI,
     scope: 'openid profile email',
-    state: '12345', // Un paramètre de sécurité (vous pouvez le rendre dynamique)
+    state: '12345',  // Un paramètre de sécurité
+    code_challenge: req.query.code_challenge,  // Récupérer le code_challenge envoyé depuis le frontend
+    code_challenge_method: 'S256', // Méthode de hashage utilisée
   });
 
   // Rediriger l'utilisateur vers Azure AD pour se connecter
@@ -35,14 +40,14 @@ app.get('/auth/login', (req, res) => {
 // Route pour récupérer l'access token après la redirection d'Azure
 app.get('/auth/openid/return', async (req, res) => {
   const { code } = req.query;
+  const { code_verifier } = req.headers;  // Récupérer le code_verifier de l'en-tête
 
-  // Vérifier que nous avons bien un code
-  if (!code) {
-    return res.status(400).json({ error: 'Code manquant dans la requête.' });
+  if (!code || !code_verifier) {
+    return res.status(400).json({ error: 'Code ou code_verifier manquants.' });
   }
 
   try {
-    // Échanger le code contre un token
+    // Échanger le code contre un token avec PKCE
     const tokenUrl = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`;
 
     const tokenResponse = await axios.post(tokenUrl, querystring.stringify({
@@ -51,7 +56,7 @@ app.get('/auth/openid/return', async (req, res) => {
       code: code,
       grant_type: 'authorization_code',
       redirect_uri: process.env.REDIRECT_URI,
-      scope: 'openid profile email',
+      code_verifier: code_verifier,  // Envoyer le code_verifier pour valider l'échange
     }));
 
     const { access_token } = tokenResponse.data;
