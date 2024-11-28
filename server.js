@@ -1,88 +1,55 @@
-require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const session = require('express-session');
-const { Issuer, generators } = require('openid-client');
+const { msalInstance } = require('./authConfig');  // Assurez-vous que msalInstance est bien importé
 
 const app = express();
-app.use(express.json());
+const port = process.env.PORT || 3000;
 
-// Configuration des variables d'environnement
-const { CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, SESSION_SECRET, TENANT_ID } = process.env;
+// Configuration CORS pour autoriser les demandes depuis ton front-end React
+const corsOptions = {
+  origin: 'https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net', // Remplace par l'URL de ton front-end React
+  methods: 'GET,POST,PUT,DELETE',
+  credentials: true,  // Permet d'envoyer des cookies avec les requêtes
+};
 
-// Configurer les sessions pour stocker le `codeVerifier`
-app.use(
-    session({
-        secret: SESSION_SECRET,
-        resave: false,
-        saveUninitialized: true,
-        cookie: { secure: false }, // Mettre à `true` en production avec HTTPS
-    })
-);
+app.use(cors(corsOptions));  // Ajoute le middleware CORS
 
-// Découverte de l'Issuer Azure AD
-let client;
-(async () => {
-    const issuer = await Issuer.discover(`https://login.microsoftonline.com/${TENANT_ID}/v2.0`);
-    client = new issuer.Client({
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
-        redirect_uris: [REDIRECT_URI],
-        response_types: ['code'],
-    });
-    console.log('Azure AD Issuer découvert avec succès');
-})();
+// Configuration de la session
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: true,
+}));
 
-// Route pour démarrer l'authentification
+// Route pour se connecter via Azure
 app.get('/auth/login', (req, res) => {
-    const codeVerifier = generators.codeVerifier();
-    const codeChallenge = generators.codeChallenge(codeVerifier);
-
-    req.session.codeVerifier = codeVerifier; // Stocker le verifier dans la session
-
-    const authorizationUrl = client.authorizationUrl({
-        scope: 'openid profile email offline_access',
-        code_challenge: codeChallenge,
-        code_challenge_method: 'S256',
-    });
-
-    res.redirect(authorizationUrl);
+  const authUrl = msalInstance.getAuthCodeUrl({
+    ...loginRequest,
+    redirectUri: process.env.REDIRECT_URI,  // Redirection après l'authentification
+  });
+  res.redirect(authUrl);
 });
 
-// Callback pour gérer la redirection après authentification
+// Route pour le callback après l'authentification
 app.get('/auth/callback', async (req, res) => {
-    const params = client.callbackParams(req);
-
-    try {
-        const tokenSet = await client.callback(REDIRECT_URI, params, {
-            code_verifier: req.session.codeVerifier, // Récupérer le verifier de la session
-        });
-
-        req.session.tokenSet = tokenSet; // Stocker les jetons dans la session
-        console.log('Authentification réussie, jetons stockés dans la session');
-        res.redirect('/'); // Rediriger vers la page principale
-    } catch (err) {
-        console.error('Erreur lors de l\'échange du code :', err.message);
-        res.status(500).send('Erreur lors de l\'authentification');
-    }
-});
-
-// Route pour récupérer les données utilisateur
-app.get('/api/user', async (req, res) => {
-    if (!req.session.tokenSet) {
-        return res.status(401).json({ error: 'Utilisateur non authentifié' });
-    }
-
-    try {
-        const userInfo = await client.userinfo(req.session.tokenSet.access_token);
-        res.json(userInfo);
-    } catch (err) {
-        console.error('Erreur lors de la récupération des informations utilisateur :', err.message);
-        res.status(500).send('Erreur lors de la récupération des informations utilisateur');
-    }
+  try {
+    const response = await msalInstance.acquireTokenByCode({
+      code: req.query.code,
+      redirectUri: process.env.REDIRECT_URI,
+      clientSecret: process.env.CLIENT_SECRET,
+    });
+    
+    // Sauvegarde le token dans la session
+    req.session.accessToken = response.accessToken;
+    res.redirect('https://ap-dfe2cvfsdafwewaw.canadacentral-01.azurewebsites.net');  // Redirige vers le front-end
+  } catch (error) {
+    console.error('Erreur de récupération du token :', error);
+    res.status(500).send('Erreur d\'authentification');
+  }
 });
 
 // Démarrage du serveur
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Serveur démarré sur http://localhost:${PORT}`);
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
