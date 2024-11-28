@@ -93,6 +93,34 @@ app.get('/auth/openid/return', async (req, res) => {
   }
 });
 
+// Rafraîchissement du token avec le refresh_token
+app.post('/auth/refresh', async (req, res) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token) {
+    return res.status(400).send('Refresh token manquant');
+  }
+
+  try {
+    const tokenResponse = await axios.post(
+      TOKEN_URL,
+      new URLSearchParams({
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        grant_type: 'refresh_token',
+        refresh_token: refresh_token,
+        redirect_uri: REDIRECT_URI,
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    const { access_token, id_token } = tokenResponse.data;
+    res.json({ access_token, id_token });
+  } catch (error) {
+    console.error('Erreur lors du rafraîchissement du token:', error.response?.data || error.message);
+    res.status(500).send('Erreur lors du rafraîchissement du token');
+  }
+});
+
 // Endpoint pour obtenir les informations de l'utilisateur avec le token d'accès
 app.get('/user-info', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
