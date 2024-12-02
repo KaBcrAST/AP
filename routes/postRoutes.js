@@ -15,12 +15,25 @@ router.get('/', async (req, res) => {
 // Exemple de route pour créer un post
 router.post('/', async (req, res) => {
   try {
-    const newPost = new Post(req.body); // Crée un nouveau post depuis le body
-    const savedPost = await newPost.save(); // Sauvegarde dans MongoDB
+    const { title, body, author_id } = req.body;
+
+    // Vérification des données
+    if (!author_id) {
+      return res.status(400).json({ error: 'Author ID is required.' });
+    }
+
+    if (!title || !body) {
+      return res.status(400).json({ error: 'Title and body are required.' });
+    }
+
+    // Création du post
+    const newPost = new Post({ title, body, author_id });
+    const savedPost = await newPost.save();
+
     res.status(201).json(savedPost);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Error creating post:', err);
+    res.status(500).json({ error: 'Failed to create post.' });
   }
 });
-
 module.exports = router; // Important : on exporte `router`
