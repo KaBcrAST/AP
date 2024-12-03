@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const postRoutes = require('./routes/postRoutes'); // Importation des routes pour les posts
-const profileRoutes = require('./routes/profileRoutes.Js'); // Importation des routes pour les profils
+const profileRoutes = require('./routes/profileRoutes.js'); // Importation des routes pour les profils
 
 // Chargement des variables d'environnement
 dotenv.config();
@@ -41,6 +41,7 @@ connectDb();
 // Utilisation des routes
 app.use('/posts', postRoutes); // Routes pour les posts
 app.use('/profiles', profileRoutes); // Routes pour les profils utilisateur
+
 
 // Route d'accueil pour tester si le serveur tourne
 app.get('/', (req, res) => {
