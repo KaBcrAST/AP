@@ -2,8 +2,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const postRoutes = require('./routes/postRoutes'); // Routes pour les posts
-const profileRoutes = require('./routes/profileRoutes'); // Routes pour les profils utilisateur
+const postRoutes = require('./routes/postRoutes'); // Importation des routes pour les posts
+const profileRoutes = require('./routes/profileRoutes.Js'); // Importation des routes pour les profils
 
 // Chargement des variables d'environnement
 dotenv.config();
@@ -11,13 +11,13 @@ dotenv.config();
 const app = express();
 
 // Middleware pour les JSON avec une limite augmentée
-app.use(express.json({ limit: '50mb' }));  // Augmente la limite pour les fichiers volumineux
+app.use(express.json({ limit: '50mb' }));  // Augmente la limite pour les fichiers volumineux (ex : 50MB)
 app.use(express.urlencoded({ limit: '50mb', extended: true }));  // Pour les formulaires si nécessaire
 
 // Configuration de CORS pour autoriser les requêtes venant de ton front-end
 app.use(cors({
   origin: 'http://localhost:3000', // Frontend React
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Autorisation des méthodes nécessaires
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
@@ -39,8 +39,8 @@ const connectDb = async () => {
 connectDb();
 
 // Utilisation des routes
-app.use('/posts', postRoutes); // Prefix des routes pour les posts
-app.use('/profiles', profileRoutes); // Prefix des routes pour les profils utilisateur
+app.use('/posts', postRoutes); // Routes pour les posts
+app.use('/profiles', profileRoutes); // Routes pour les profils utilisateur
 
 // Route d'accueil pour tester si le serveur tourne
 app.get('/', (req, res) => {
